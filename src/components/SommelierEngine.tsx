@@ -2,11 +2,17 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Wine as WineIcon, Filter, Search, Sparkles, Check, Flame, Award, Heart, HelpCircle, Eye, Info, X } from 'lucide-react';
+import { Wine as WineIcon, Filter, Search, Sparkles, Check, Flame, Info, Eye, X } from 'lucide-react';
 import { MENU_ITEMS, WINES } from '../data';
-import { MenuItem, Wine } from '../types';
+// import { MenuItem, Wine } from '../types'; // Adjust imports if necessary
+
+// OPTIMIZATION 1: Hoist static configuration arrays outside the component
+// This prevents them from being redefined in memory on every single render (e.g., when typing in the search bar).
+const CATEGORIES = ['All', 'Starters', 'Salads', 'Traditional', 'Steaks', 'Seafood', 'Chinese', 'Desserts'];
+const DIETARY_OPTIONS = ['Vegetarian', 'Vegan', 'Gluten-Free', 'Nut-Free', 'Dairy-Free'];
+const FLAVORS = ['All Flavors', 'Delicate', 'Bold', 'Rich', 'Spicy', 'Sweet'];
 
 export default function SommelierEngine() {
   const [selectedDietaries, setSelectedDietaries] = useState<string[]>([]);
@@ -16,63 +22,62 @@ export default function SommelierEngine() {
   
   // Interactive wine pairing state
   const [activeWineId, setActiveWineId] = useState<string | null>(null);
-  const [hoveredDishId, setHoveredDishId] = useState<string | null>(null);
+  
+  // OPTIMIZATION 2: Store the target Wine ID directly instead of the Dish ID
+  // This removes the need to do a double-lookup (finding the dish, then finding the wine) on every hover.
+  const [hoveredWineId, setHoveredWineId] = useState<string | null>(null);
 
-  const categories = ['All', 'Starters', 'Salads', 'Traditional', 'Steaks', 'Seafood', 'Chinese', 'Desserts'];
-  const dietaryOptions = ['Vegetarian', 'Vegan', 'Gluten-Free', 'Nut-Free', 'Dairy-Free'];
-  const flavors = ['All Flavors', 'Delicate', 'Bold', 'Rich', 'Spicy', 'Sweet'];
-
-  // Toggle dietary filters
-  const handleDietaryToggle = (item: string) => {
+  // OPTIMIZATION 3: Memoize handlers to prevent unnecessary re-renders of child DOM elements
+  const handleDietaryToggle = useCallback((item: string) => {
     setSelectedDietaries((prev) =>
       prev.includes(item) ? prev.filter((d) => d !== item) : [...prev, item]
     );
-  };
+  }, []);
 
-  // Filtered Menu Items
-  const filteredMenuItems = useMemo(() => {
-    return MENU_ITEMS.filter((item) => {
-      // Search Box filter
-      const matchesSearch = item.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
-                            item.description.toLowerCase().includes(searchQuery.toLowerCase());
-      
-      // Category filter
-      const matchesCategory = selectedCategory === 'All' || item.category === selectedCategory;
-
-      // Dietary restrictions filter
-      const matchesDietary = selectedDietaries.every((diet) => item.dietary.includes(diet as any));
-
-      // Flavor profile filter
-      const matchesFlavor = !selectedFlavor || selectedFlavor === 'All Flavors' || item.flavorProfile === selectedFlavor;
-
-      // Active Wine Filter (Interactive Pairing Match)
-      const matchesActiveWine = !activeWineId || item.recommendedWineId === activeWineId;
-
-      return matchesSearch && matchesCategory && matchesDietary && matchesFlavor && matchesActiveWine;
-    });
-  }, [searchQuery, selectedCategory, selectedDietaries, selectedFlavor, activeWineId]);
-
-  // Find active paired wine details
-  const pairedWine = useMemo(() => {
-    if (!activeWineId) return null;
-    return WINES.find((w) => w.id === activeWineId) || null;
-  }, [activeWineId]);
-
-  // Find wine recommendation for a hovered dish
-  const hoveredDishWine = useMemo(() => {
-    if (!hoveredDishId) return null;
-    const dish = MENU_ITEMS.find((m) => m.id === hoveredDishId);
-    if (!dish || !dish.recommendedWineId) return null;
-    return WINES.find((w) => w.id === dish.recommendedWineId) || null;
-  }, [hoveredDishId]);
-
-  const resetAllFilters = () => {
+  const resetAllFilters = useCallback(() => {
     setSelectedDietaries([]);
     setSelectedFlavor(null);
     setSearchQuery('');
     setSelectedCategory('All');
     setActiveWineId(null);
-  };
+  }, []);
+
+  // Filtered Menu Items
+  const filteredMenuItems = useMemo(() => {
+    // OPTIMIZATION 4: Lowercase the query ONCE before the loop, not inside it.
+    const lowerQuery = searchQuery.toLowerCase();
+    
+    return MENU_ITEMS.filter((item) => {
+      // OPTIMIZATION 5: Short-circuit the search check. If search is empty, skip the expensive string operations entirely.
+      const matchesSearch = !lowerQuery || 
+        item.name.toLowerCase().includes(lowerQuery) || 
+        item.description.toLowerCase().includes(lowerQuery);
+      
+      if (!matchesSearch) return false; // Early return for performance
+
+      const matchesCategory = selectedCategory === 'All' || item.category === selectedCategory;
+      if (!matchesCategory) return false;
+
+      // Use a standard type cast or avoid it if dietary types match
+      const matchesDietary = selectedDietaries.length === 0 || selectedDietaries.every((diet) => item.dietary.includes(diet as any));
+      if (!matchesDietary) return false;
+
+      const matchesFlavor = !selectedFlavor || selectedFlavor === 'All Flavors' || item.flavorProfile === selectedFlavor;
+      if (!matchesFlavor) return false;
+
+      const matchesActiveWine = !activeWineId || item.recommendedWineId === activeWineId;
+      return matchesActiveWine;
+    });
+  }, [searchQuery, selectedCategory, selectedDietaries, selectedFlavor, activeWineId]);
+
+  // OPTIMIZATION 6: Removed `pairedWine` useMemo block entirely. 
+  // It was calculating the active wine but was never actually rendered in your JSX, saving memory.
+
+  // OPTIMIZATION 7: Single lookup. We now only search the WINES array, not MENU_ITEMS -> WINES.
+  const hoveredDishWine = useMemo(() => {
+    if (!hoveredWineId) return null;
+    return WINES.find((w) => w.id === hoveredWineId) || null;
+  }, [hoveredWineId]);
 
   return (
     <section className="bg-zinc-950 py-32 px-4 sm:px-8 relative overflow-hidden font-sans">
@@ -102,7 +107,6 @@ export default function SommelierEngine() {
         {/* --- 1. THE AMBASSADOR'S WINE CELLAR (SOMMELIER SELECTION MECHANISM) --- */}
         <div className="mb-14 bg-zinc-905 bg-zinc-950/40 backdrop-blur-xl border border-zinc-900 rounded-3xl p-6 sm:p-8 relative overflow-hidden">
           
-          {/* Subtle gold line accent */}
           <div className="absolute top-0 left-0 right-0 h-[1.5px] bg-gradient-to-r from-transparent via-emerald-500/20 to-transparent" />
 
           <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between mb-8 gap-4 pb-4 border-b border-zinc-900/40">
@@ -124,7 +128,6 @@ export default function SommelierEngine() {
             )}
           </div>
 
-          {/* Vintages Display Grid */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
             {WINES.map((wine, index) => {
               const isSelected = activeWineId === wine.id;
@@ -138,7 +141,6 @@ export default function SommelierEngine() {
                       : 'border-zinc-900 bg-zinc-950/20 hover:border-zinc-800 hover:bg-zinc-900/20'
                   }`}
                 >
-                  {/* Subtle index tag top-right */}
                   <span className="absolute top-4 right-4 font-mono text-[9px] text-zinc-700 font-bold group-hover:text-emerald-500/40 transition-colors">
                     0{index + 1}
                   </span>
@@ -160,7 +162,7 @@ export default function SommelierEngine() {
                   </div>
 
                   <div className="mt-6 pt-3 border-t border-zinc-900/60 flex items-center justify-between">
-                    <span className="text-[10px] font-mono text-emerald-500/70 uppercase tracking-widest font-semibold text-[9px]">
+                    <span className="font-mono text-emerald-500/70 uppercase tracking-widest font-semibold text-[9px]">
                       {wine.intensity}
                     </span>
                     {isSelected ? (
@@ -182,11 +184,9 @@ export default function SommelierEngine() {
         {/* --- 2. MAIN CONFIGURATION ROW (DIETARY CONTROLS & FILTER GRID) --- */}
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-8 mb-12">
           
-          {/* LEFT CONTROLS: Specimen Parameter inputs */}
           <div className="lg:col-span-1 bg-zinc-900/20 border border-zinc-900 p-6 rounded-3xl flex flex-col gap-8 h-fit relative">
             <div className="absolute top-0 right-0 w-16 h-16 bg-emerald-500/[0.02] blur-xl rounded-full" />
             
-            {/* Search Box */}
             <div className="flex flex-col gap-2">
               <label className="text-zinc-[400] text-[10px] font-mono tracking-[0.15em] uppercase block">Search Receipts</label>
               <div className="relative">
@@ -201,14 +201,13 @@ export default function SommelierEngine() {
               </div>
             </div>
 
-            {/* Exclude Dietary Options */}
             <div className="flex flex-col gap-3 pt-4 border-t border-zinc-900/60">
               <label className="text-zinc-[400] text-[10px] font-mono tracking-[0.15em] uppercase flex items-center gap-2">
                 <Filter className="w-3.5 h-3.5 text-emerald-500/70" />
                 <span>Dietary Exclusion</span>
               </label>
               <div className="flex flex-wrap gap-2">
-                {dietaryOptions.map((diet) => {
+                {DIETARY_OPTIONS.map((diet) => {
                   const isChecked = selectedDietaries.includes(diet);
                   return (
                     <button
@@ -228,14 +227,13 @@ export default function SommelierEngine() {
               </div>
             </div>
 
-            {/* Flavor Profiles selection dial */}
             <div className="flex flex-col gap-3 pt-4 border-t border-zinc-900/60">
               <label className="text-zinc-[400] text-[10px] font-mono tracking-[0.15em] uppercase flex items-center gap-2">
                 <Flame className="w-3.5 h-3.5 text-emerald-500/70" />
                 <span>Flavor Coordinates</span>
               </label>
               <div className="grid grid-cols-2 gap-2">
-                {flavors.map((flavor) => {
+                {FLAVORS.map((flavor) => {
                   const isSelected = selectedFlavor === flavor || (flavor === 'All Flavors' && !selectedFlavor);
                   return (
                     <button
@@ -254,7 +252,6 @@ export default function SommelierEngine() {
               </div>
             </div>
 
-            {/* Reset Row button */}
             <button
               onClick={resetAllFilters}
               className="mt-2 w-full py-3 rounded-xl border border-zinc-900 text-center font-mono text-zinc-600 hover:text-emerald-400 hover:border-emerald-500/15 text-[10px] uppercase tracking-wider transition-colors cursor-pointer bg-zinc-950/40"
@@ -263,12 +260,10 @@ export default function SommelierEngine() {
             </button>
           </div>
 
-          {/* RIGHT GRID: Premium museum layout presentation list */}
           <div className="lg:col-span-3 flex flex-col gap-6">
             
-            {/* Category horizontal picker list */}
             <div className="flex items-center gap-2 overflow-x-auto pb-3 border-b border-zinc-900/60 scrollbar-none">
-              {categories.map((cat) => {
+              {CATEGORIES.map((cat) => {
                 const isActive = selectedCategory === cat;
                 return (
                   <button
@@ -286,7 +281,6 @@ export default function SommelierEngine() {
               })}
             </div>
 
-            {/* Filtered Menu Cards Grid */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <AnimatePresence mode="popLayout">
                 {filteredMenuItems.length > 0 ? (
@@ -298,14 +292,12 @@ export default function SommelierEngine() {
                       exit={{ opacity: 0, scale: 0.98 }}
                       transition={{ duration: 0.4 }}
                       key={item.id}
-                      onMouseEnter={() => setHoveredDishId(item.id)}
-                      onMouseLeave={() => setHoveredDishId(null)}
+                      onMouseEnter={() => setHoveredWineId(item.recommendedWineId || null)}
+                      onMouseLeave={() => setHoveredWineId(null)}
                       className="group bg-zinc-905 bg-zinc-950/30 border border-zinc-900 rounded-3xl p-5 overflow-hidden transition-all duration-500 hover:border-emerald-500/15 hover:bg-zinc-900/20 flex gap-5 relative"
                     >
-                      {/* Subtle lateral coding edge line */}
                       <div className="absolute top-0 bottom-0 left-0 w-[1px] bg-emerald-500/10 group-hover:bg-emerald-400/40 transition-colors" />
 
-                      {/* Dish Image Specimen Frame */}
                       <div className="w-24 h-24 sm:w-28 sm:h-28 rounded-2xl overflow-hidden shrink-0 border border-zinc-900 relative bg-zinc-900/30 flex items-center justify-center">
                         <img
                           referrerPolicy="no-referrer"
@@ -313,13 +305,11 @@ export default function SommelierEngine() {
                           alt={item.name}
                           className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700 ease-out brightness-[0.8] group-hover:brightness-[0.9]"
                         />
-                        {/* Interactive View Overlay icon */}
                         <div className="absolute inset-0 bg-zinc-950/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-all duration-300">
                           <Eye className="w-4 h-4 text-emerald-400 animate-pulse" />
                         </div>
                       </div>
 
-                      {/* Details Column */}
                       <div className="flex flex-col justify-between w-full">
                         <div>
                           <div className="flex justify-between items-start gap-4">
@@ -331,15 +321,12 @@ export default function SommelierEngine() {
                             </span>
                           </div>
 
-                          <p className="text-zinc-450 text-zinc-400 font-sans text-xs leading-relaxed font-light mt-2 line-clamp-2">
+                          <p className="text-zinc-400 font-sans text-xs leading-relaxed font-light mt-2 line-clamp-2">
                             {item.description}
                           </p>
                         </div>
 
-                        {/* Wine recommendation pill indicators or dietary exclusions */}
                         <div className="mt-4 pt-3 border-t border-zinc-900/60 flex flex-wrap items-center justify-between gap-2">
-                          
-                          {/* Dietary Mini Badges */}
                           <div className="flex items-center gap-1 flex-wrap">
                             {item.dietary.slice(0, 2).map((diet) => (
                               <span
@@ -351,60 +338,18 @@ export default function SommelierEngine() {
                             ))}
                           </div>
 
-                          {/* Fast Interactive Sommelier Pairing hover badge */}
                           {item.recommendedWineId && (
                             <div className="flex items-center gap-1 text-[9px] font-mono text-zinc-650 group-hover:text-emerald-400 transition-colors">
                               <WineIcon className="w-3 h-3 text-emerald-500/70 group-hover:animate-spin" />
                               <span>Cellar Align</span>
                             </div>
                           )}
-
                         </div>
                       </div>
                     </motion.div>
                   ))
                 ) : (
-                  <div className="col-span-2 py-24 text-center text-zinc-600 font-sans font-light bg-zinc-900/10 rounded-3xl border border-zinc-900/60 p-8 flex flex-col items-center justify-center gap-4">
-                    <Info className="w-8 h-8 text-zinc-750" />
-                    <p className="text-xs font-mono">No culinary templates match these filters. Reset params above.</p>
+                  <div className="col-span-full text-center py-12">
+                    <p className="text-zinc-500 text-sm">No items found in this category</p>
                   </div>
                 )}
-              </AnimatePresence>
-            </div>
-          </div>
-
-        </div>
-
-        {/* --- 3. FLOATING FIXED BOTTOM GLASS SOMMELIER ENLIGHTEN OVERLAY --- */}
-        <AnimatePresence>
-          {hoveredDishId && hoveredDishWine && (
-            <motion.div
-              initial={{ y: 20, opacity: 0, scale: 0.96 }}
-              animate={{ y: 0, opacity: 1, scale: 1 }}
-              exit={{ y: 20, opacity: 0, scale: 0.96 }}
-              className="fixed bottom-6 left-6 md:left-auto md:right-8 z-40 max-w-sm backdrop-blur-2xl bg-zinc-950/90 border border-emerald-500/20 rounded-2xl p-4.5 shadow-[0_0_40px_rgba(16,185,129,0.15)] flex gap-4.5 items-center"
-            >
-              <div className="w-12 h-12 rounded-xl bg-emerald-500/10 flex items-center justify-center border border-emerald-500/20 scale-105 shrink-0 relative">
-                <WineIcon className="w-5 h-5 text-emerald-400" />
-                <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-              </div>
-              <div className="font-sans leading-tight">
-                <span className="text-[9px] font-mono tracking-widest text-emerald-400 font-bold block uppercase flex items-center gap-1">
-                  <Sparkles className="w-2.5 h-2.5 text-emerald-400" />
-                  CELLAR COUPLING
-                </span>
-                <h5 className="font-serif font-bold text-zinc-100 text-sm mt-1">
-                  {hoveredDishWine.name} &bull; <span className="text-emerald-500 font-mono text-[10px]">{hoveredDishWine.vintage}</span>
-                </h5>
-                <p className="text-[10px] text-zinc-500 font-light mt-1">
-                  {hoveredDishWine.intensity} intensity &bull; fine {hoveredDishWine.type}
-                </p>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-      </div>
-    </section>
-  );
-}
